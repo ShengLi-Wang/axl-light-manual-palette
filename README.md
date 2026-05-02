@@ -4,6 +4,8 @@ Axl Light is a non-invasive Obsidian plugin for reading highlights and sticky no
 
 ## Install
 
+![Install Axl Light](docs/images/install-axl-light.png)
+
 ### Option 1: Manual install
 
 1. Go to the latest release: https://github.com/epiphie/axl-light/releases/latest
@@ -38,6 +40,20 @@ https://github.com/epiphie/axl-light
 ```
 
 4. Enable `Axl Light` in `Settings -> Community plugins`.
+
+## How to use
+
+### Highlight Markdown or PDF text
+
+![Highlight with Axl Light](docs/images/highlight-with-axl-light.png)
+
+Select text in a Markdown note or PDF, then use the floating toolbar to choose a highlight color, add a sticky note, copy the selection, or open the annotation overview.
+
+### Review sticky notes
+
+![Sticky notes and annotation overview](docs/images/sticky-notes-overview.png)
+
+On desktop, sticky notes live in the right-side reader lane. On narrow panes, click a highlight to open the note popover. The overview panel lets you search, filter, jump, delete, and export annotations.
 
 ## Features
 

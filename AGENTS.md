@@ -6,6 +6,7 @@
 .gitignore: 发布仓库忽略规则，排除依赖、构建产物、本地 vault 数据。
 LICENSE: MIT 开源许可证，满足 Obsidian 社区插件提交前置要求。
 annotation-layout-mocks.html: 四种阅读注释布局的静态视觉 mock，用于决策便利贴显示策略。
+docs/AGENTS.md: 文档资产地图，管理 README 使用的安装与使用流程图。
 package.json: 插件工程依赖与脚本入口，定义构建与开发命令。
 manifest.json: Obsidian 插件清单，声明插件标识、版本与最低兼容版本。
 versions.json: Obsidian 版本到插件版本的发布映射。
