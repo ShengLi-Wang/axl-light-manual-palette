@@ -1,0 +1,9 @@
+{
+  "id": "axl-light",
+  "name": "Axl Light",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Non-invasive highlights and sticky notes for Obsidian Markdown and PDF reading.",
+  "author": "Epiphany Xiao",
+  "isDesktopOnly": false
+}
