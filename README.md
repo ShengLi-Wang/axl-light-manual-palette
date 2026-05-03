@@ -4,6 +4,8 @@ Axl Light is a non-invasive Obsidian plugin for reading highlights and sticky no
 
 ## Quick Start
 
+Do **not** download the source code ZIP from the green `Code` button. The source repo contains `main.ts` for development. Obsidian needs the built release file `main.js`.
+
 Run this in **Terminal**. Replace the path with your Obsidian vault path:
 
 ```bash
@@ -39,23 +41,26 @@ This downloads `main.js`, `manifest.json`, and `styles.css` into:
 ### Option 2: Manual install
 
 1. Go to the latest release: https://github.com/little-pond/axl-light/releases/latest
-2. Download these three files from `Assets`:
+2. Scroll to `Assets`. Do **not** download `Source code`.
+3. Download these three files:
 
 - `main.js`
 - `manifest.json`
 - `styles.css`
 
-3. Create this folder inside your Obsidian vault:
+4. Create this folder inside your Obsidian vault:
 
 ```text
 <your-vault>/.obsidian/plugins/axl-light/
 ```
 
-4. Move the three downloaded files into that folder.
-5. Restart Obsidian.
-6. Open `Settings -> Community plugins`.
-7. Turn off `Restricted mode` if needed.
-8. Enable `Axl Light`.
+5. Move the three downloaded files into that folder.
+6. Restart Obsidian.
+7. Open `Settings -> Community plugins`.
+8. Turn off `Restricted mode` if needed.
+9. Enable `Axl Light`.
+
+If you only see `main.ts`, you are looking at the source code page, not the release assets. Open the latest release link above and download `main.js` from `Assets`.
 
 ### Option 3: BRAT install
 
