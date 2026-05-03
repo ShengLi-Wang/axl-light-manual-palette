@@ -16,7 +16,7 @@ Then restart Obsidian, open `Settings -> Community plugins`, and enable `Axl Lig
 
 ## Install
 
-![Install Axl Light](docs/images/install-axl-light.png)
+![Install Axl Light from Terminal](docs/images/install-axl-light-command.png)
 
 ### Option 1: One-command install
 

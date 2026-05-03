@@ -3,6 +3,7 @@
 
 成员清单
 images/install-axl-light.png: GitHub release 到 Obsidian 插件目录的安装流程图。
+images/install-axl-light-command.png: Terminal 一条命令安装 Axl Light 的新版安装流程图。
 images/highlight-with-axl-light.png: 选中文本并用浮动工具栏高亮的使用流程图。
 images/sticky-notes-overview.png: 右侧 sticky lane、Annotation Overview 与窄屏 popover 的阅读体验图。
 
