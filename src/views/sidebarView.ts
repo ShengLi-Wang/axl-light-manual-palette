@@ -105,7 +105,7 @@ export class AnnotationSidebarView extends ItemView {
   }
 
   getIcon(): string {
-    return "pencil";
+    return "axl-light-icon";
   }
 
   async onOpen(): Promise<void> {
@@ -135,8 +135,12 @@ export class AnnotationSidebarView extends ItemView {
       document.pdfComments,
     );
     const cards = this.filterCards(rawCards);
-    const highlightCount = document.highlights.length + document.pdfHighlights.length;
-    const noteCount = document.comments.length + document.pdfComments.length;
+    const highlightCount =
+      document.highlights.filter((highlight) => !highlight.orphaned).length +
+      document.pdfHighlights.filter((highlight) => !highlight.orphaned).length;
+    const noteCount =
+      document.comments.filter((comment) => !comment.orphaned).length +
+      document.pdfComments.filter((comment) => !comment.orphaned).length;
     container.createDiv({ cls: "axl-ov-count", text: `${highlightCount} highlights · ${noteCount} notes` });
 
     const list = container.createDiv({ cls: "axl-ov-list" });
@@ -318,7 +322,7 @@ export class AnnotationSidebarView extends ItemView {
 
   private renderHeader(container: Element): void {
     const header = container.createDiv({ cls: "axl-ov-head" });
-    header.createSpan({ cls: "axl-ov-title", text: "Annotation Overview" });
+    header.createSpan({ cls: "axl-ov-title", text: "Axl Light" });
     const close = header.createEl("button", {
       cls: "axl-icon-btn axl-ov-close",
       attr: { type: "button", title: "Close panel", "aria-label": "Close Axl Light panel" },

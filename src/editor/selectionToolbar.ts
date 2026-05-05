@@ -17,21 +17,32 @@ interface SelectionToolbarOptions {
 export class SelectionToolbar {
   private readonly element: HTMLElement;
   private visible = false;
+  private readonly handleMouseUp = (): void => {
+    window.setTimeout(() => this.showForSelection(), 0);
+  };
 
   constructor(private readonly options: SelectionToolbarOptions) {
     this.element = document.body.createDiv({ cls: "axl-toolbar axl-selection-toolbar" });
     this.render();
     this.hide();
+    document.addEventListener("mouseup", this.handleMouseUp);
   }
 
   destroy(): void {
+    document.removeEventListener("mouseup", this.handleMouseUp);
     this.element.remove();
   }
 
   showForSelection(): void {
-    const range = window.getSelection()?.rangeCount ? window.getSelection()?.getRangeAt(0) : null;
-    const text = window.getSelection()?.toString().trim() ?? "";
-    if (!range || !text) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      this.hide();
+      return;
+    }
+
+    const text = selection.toString().trim();
+    const range = selection.getRangeAt(0);
+    if (!text || !isSelectionInsideWorkspace(range)) {
       this.hide();
       return;
     }
@@ -89,6 +100,23 @@ export class SelectionToolbar {
     button.innerHTML = svg;
     return button;
   }
+}
+
+function isSelectionInsideWorkspace(range: Range): boolean {
+  const container =
+    range.commonAncestorContainer instanceof HTMLElement
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+
+  if (!container) {
+    return false;
+  }
+
+  return Boolean(
+    container.closest(".workspace") ||
+      container.closest(".callout-content") ||
+      container.closest(".markdown-preview-view"),
+  );
 }
 
 const NOTE_ICON = `

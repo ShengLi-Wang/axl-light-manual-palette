@@ -5,11 +5,11 @@
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
-import { Editor, MarkdownPostProcessorContext, MarkdownView, Modal, Notice, Plugin, TFile } from "obsidian";
+import { addIcon, Editor, MarkdownPostProcessorContext, MarkdownView, Modal, Notice, Plugin, TFile } from "obsidian";
 
 import { createTextAnchor, relocateDocumentAnchors } from "./src/anchor/textAnchor";
 import { createHighlightExtension } from "./src/editor/highlightExtension";
-import { installReadingViewHighlights } from "./src/editor/readingViewHighlight";
+import { installReadingViewHighlights, refreshReadingViewHighlights } from "./src/editor/readingViewHighlight";
 import { SelectionToolbar } from "./src/editor/selectionToolbar";
 import { PdfAnnotationLayer } from "./src/pdf/pdfAnnotationLayer";
 import { AnnotationSettingsTab } from "./src/settings/settingsTab";
@@ -36,6 +36,19 @@ const NOTE_TITLE_OPTIONS = [
   { value: "Reminder", label: "🔔 Reminder" },
 ] as const;
 
+const AXL_LIGHT_ICON = `
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <rect x="5" y="5" width="90" height="90" rx="20" ry="20" fill="#F5C518"/>
+    <g transform="translate(50,50) rotate(-45) translate(-18,-18)"
+      fill="none" stroke="#000" stroke-width="6"
+      stroke-linecap="round" stroke-linejoin="round">
+      <rect x="8" y="2" width="20" height="28" rx="3" fill="#000" stroke="none"/>
+      <polygon points="8,30 28,30 18,42" fill="#000" stroke="none"/>
+      <line x1="8" y1="10" x2="28" y2="10" stroke="#F5C518" stroke-width="3"/>
+    </g>
+  </svg>
+`;
+
 export default class OverlayAnnotationsPlugin extends Plugin {
   settings: AnnotationPluginSettings = DEFAULT_SETTINGS;
   store!: AnnotationStore;
@@ -47,6 +60,7 @@ export default class OverlayAnnotationsPlugin extends Plugin {
   private renameMigrationTimer: number | null = null;
 
   async onload(): Promise<void> {
+    addIcon("axl-light-icon", AXL_LIGHT_ICON);
     await this.loadSettings();
     this.store = new AnnotationStore(this.app);
     await this.store.initialize();
@@ -237,6 +251,7 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     }
 
     const snapshot = await this.resolveSelection();
+
     if (!snapshot) {
       new Notice("Select text first.");
       return;
@@ -250,11 +265,12 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     const highlight: HighlightAnnotation = {
       id: crypto.randomUUID(),
       color,
-      anchor: createTextAnchor(await this.app.vault.cachedRead(file), snapshot.startOffset, snapshot.endOffset),
+      anchor: createAnchorForSnapshot(await this.app.vault.cachedRead(file), snapshot),
       createdAt: new Date().toISOString(),
     };
 
     await this.store.addHighlight(file, highlight);
+    await this.refreshActiveReadingViewHighlights(file.path);
     await this.refreshAnnotations();
     this.toolbar.hide();
   }
@@ -293,7 +309,7 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     const now = new Date().toISOString();
     const comment: CommentAnnotation = {
       id: crypto.randomUUID(),
-      anchor: createTextAnchor(await this.app.vault.cachedRead(file), snapshot.startOffset, snapshot.endOffset),
+      anchor: createAnchorForSnapshot(await this.app.vault.cachedRead(file), snapshot),
       title: note.title,
       content: note.content,
       color: this.settings.defaultHighlightColor,
@@ -307,8 +323,45 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     };
 
     await this.store.addComment(file, comment);
+    await this.refreshActiveReadingViewHighlights(file.path);
     await this.refreshAnnotations();
     this.toolbar.hide();
+  }
+
+  private async refreshActiveReadingViewHighlights(filePath: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) {
+      return;
+    }
+
+    const document = this.store.getCachedDocument(filePath) ?? (await this.store.getDocument(file));
+    const marks = [...document.highlights, ...document.comments].filter((item) => !item.orphaned);
+    if (!marks.length) {
+      return;
+    }
+
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView) || view.file?.path !== filePath) {
+        continue;
+      }
+
+      const previewRoot = findPreviewRoot(view);
+      if (previewRoot) {
+        refreshReadingViewHighlights(previewRoot, marks);
+        continue;
+      }
+
+      const previewMode = (view as MarkdownView & { previewMode?: { rerender?: (force?: boolean) => Promise<void> } })
+        .previewMode;
+      if (previewMode?.rerender) {
+        await previewMode.rerender(true);
+        const rerenderedRoot = findPreviewRoot(view);
+        if (rerenderedRoot) {
+          refreshReadingViewHighlights(rerenderedRoot, marks);
+        }
+      }
+    }
   }
 
   private async resolveSelection(): Promise<SelectionSnapshot | null> {
@@ -324,15 +377,23 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     }
 
     const file = this.app.workspace.getActiveFile();
-    const selectedText = window.getSelection()?.toString().trim() ?? "";
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().replace(/\r\n/g, "\n").trim() ?? "";
+
     if (file && selectedText) {
       const source = await this.app.vault.cachedRead(file);
-      const start = source.indexOf(selectedText);
-      if (start >= 0) {
+      const located = locateRenderedSelectionInSource(
+        source,
+        selectedText,
+        selection ? renderedOccurrenceBeforeSelection(selection, selectedText) : 0,
+        selection ? isSelectionInsideCallout(selection) : false,
+      );
+
+      if (located) {
         this.lastSelection = {
           filePath: file.path,
-          startOffset: start,
-          endOffset: start + selectedText.length,
+          startOffset: located.startOffset,
+          endOffset: located.endOffset,
           selectedText,
         };
         return this.lastSelection;
@@ -394,6 +455,7 @@ export default class OverlayAnnotationsPlugin extends Plugin {
       document.comments.find((comment) => comment.id === annotationId) ??
       document.highlights.find((highlight) => highlight.id === annotationId);
     if (!primary) {
+      unwrapStaleHighlight(mark);
       return;
     }
 
@@ -421,6 +483,8 @@ export default class OverlayAnnotationsPlugin extends Plugin {
       return;
     }
 
+    await sleep(100);
+
     const file = this.app.vault.getAbstractFileByPath(context.sourcePath);
     if (!(file instanceof TFile)) {
       return;
@@ -430,6 +494,214 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     const marks = [...document.highlights, ...document.comments].filter((item) => !item.orphaned);
     installReadingViewHighlights({ root: element, context, marks });
   }
+}
+
+function locateRenderedSelectionInSource(
+  source: string,
+  selectedText: string,
+  occurrenceIndex = 0,
+  preferRendered = false,
+): { startOffset: number; endOffset: number } | null {
+  const exact = nthIndexOf(source, selectedText, occurrenceIndex);
+  if (exact >= 0) {
+    return {
+      startOffset: exact,
+      endOffset: exact + selectedText.length,
+    };
+  }
+
+  if (preferRendered) {
+    const rendered = locateSelectionIgnoringQuoteMarkers(source, selectedText, occurrenceIndex);
+    if (rendered) {
+      return rendered;
+    }
+  }
+
+  return locateSelectionIgnoringQuoteMarkers(source, selectedText, occurrenceIndex);
+}
+
+function createAnchorForSnapshot(source: string, snapshot: SelectionSnapshot) {
+  const anchor = createTextAnchor(source, snapshot.startOffset, snapshot.endOffset);
+  const selectedText = snapshot.selectedText.replace(/\r\n/g, "\n").trim();
+  const sourceText = anchor.selectedText.replace(/\r\n/g, "\n").trim();
+  if (!selectedText || selectedText === sourceText) {
+    return anchor;
+  }
+
+  return {
+    ...anchor,
+    selectedText,
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function findPreviewRoot(view: MarkdownView): HTMLElement | null {
+  const previewMode = (
+    view as MarkdownView & {
+      previewMode?: {
+        containerEl?: HTMLElement;
+      };
+    }
+  ).previewMode;
+
+  return (
+    view.containerEl.querySelector<HTMLElement>(".markdown-preview-view") ??
+    view.containerEl.querySelector<HTMLElement>(".markdown-preview-section") ??
+    view.containerEl.querySelector<HTMLElement>(".mod-preview") ??
+    previewMode?.containerEl?.querySelector<HTMLElement>(".markdown-preview-section") ??
+    previewMode?.containerEl ??
+    null
+  );
+}
+
+function unwrapStaleHighlight(mark: HTMLElement): void {
+  const parent = mark.parentNode;
+  if (!parent) {
+    mark.remove();
+    return;
+  }
+
+  while (mark.firstChild) {
+    parent.insertBefore(mark.firstChild, mark);
+  }
+  parent.removeChild(mark);
+  parent.normalize();
+}
+
+function locateSelectionIgnoringQuoteMarkers(
+  source: string,
+  selectedText: string,
+  occurrenceIndex = 0,
+): { startOffset: number; endOffset: number } | null {
+  const normalizedSelection = selectedText.replace(/\r\n/g, "\n");
+  const sourceToRendered: number[] = [];
+  let rendered = "";
+  let lineStart = true;
+  let quotePrefix = false;
+  let index = 0;
+
+  while (index < source.length) {
+    const char = source[index];
+
+    if (lineStart && char === ">") {
+      quotePrefix = true;
+      lineStart = false;
+      index += 1;
+      continue;
+    }
+
+    if (quotePrefix && char === " ") {
+      quotePrefix = false;
+      index += 1;
+      continue;
+    }
+
+    if (!quotePrefix && char === "[" && source.slice(index).match(/^\[![\w-]+\]/)) {
+      while (index < source.length && source[index] !== "\n") {
+        index += 1;
+      }
+      quotePrefix = false;
+      continue;
+    }
+
+    quotePrefix = false;
+    rendered += char;
+    sourceToRendered.push(index);
+    lineStart = char === "\n";
+    index += 1;
+  }
+
+  const renderedStart = nthIndexOf(rendered, normalizedSelection, occurrenceIndex);
+  if (renderedStart < 0) {
+    return null;
+  }
+
+  const renderedEnd = renderedStart + normalizedSelection.length - 1;
+  return {
+    startOffset: sourceToRendered[renderedStart],
+    endOffset: sourceToRendered[renderedEnd] + 1,
+  };
+}
+
+function renderedOccurrenceBeforeSelection(selection: Selection, selectedText: string): number {
+  if (!selection.rangeCount || !selectedText) {
+    return 0;
+  }
+
+  const range = selection.getRangeAt(0);
+  const root = selectionRoot(range);
+  if (!root) {
+    return 0;
+  }
+
+  const before = document.createRange();
+  before.selectNodeContents(root);
+  before.setEnd(range.startContainer, range.startOffset);
+  const beforeText = before.toString().replace(/\r\n/g, "\n");
+  before.detach();
+  return countOccurrences(beforeText, selectedText);
+}
+
+function selectionRoot(range: Range): HTMLElement | null {
+  const container =
+    range.commonAncestorContainer instanceof HTMLElement
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+
+  return (
+    container?.closest<HTMLElement>(".markdown-preview-view") ??
+    container?.closest<HTMLElement>(".markdown-preview-section") ??
+    container?.closest<HTMLElement>(".mod-preview") ??
+    null
+  );
+}
+
+function isSelectionInsideCallout(selection: Selection): boolean {
+  if (!selection.rangeCount) {
+    return false;
+  }
+
+  const range = selection.getRangeAt(0);
+  const container =
+    range.commonAncestorContainer instanceof HTMLElement
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+
+  return Boolean(container?.closest(".callout, .callout-content"));
+}
+
+function countOccurrences(source: string, target: string): number {
+  if (!target) {
+    return 0;
+  }
+
+  let count = 0;
+  let cursor = source.indexOf(target);
+  while (cursor >= 0) {
+    count += 1;
+    cursor = source.indexOf(target, cursor + target.length);
+  }
+  return count;
+}
+
+function nthIndexOf(source: string, target: string, occurrenceIndex: number): number {
+  if (!target) {
+    return -1;
+  }
+
+  let cursor = source.indexOf(target);
+  let seen = 0;
+  while (cursor >= 0) {
+    if (seen >= occurrenceIndex) {
+      return cursor;
+    }
+    seen += 1;
+    cursor = source.indexOf(target, cursor + target.length);
+  }
+  return -1;
 }
 
 class CommentModal extends Modal {

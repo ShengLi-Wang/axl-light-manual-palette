@@ -10,7 +10,7 @@ import { MarkdownPostProcessorContext, MarkdownRenderChild, Platform } from "obs
 import { findBestFuzzyMatch } from "../anchor/fuzzyMatch";
 import { AnnotationColor, CommentAnnotation, HighlightAnnotation, TextAnchor } from "../storage/types";
 
-type ReadingMark = Pick<HighlightAnnotation | CommentAnnotation, "id" | "color" | "anchor" | "orphaned">;
+export type ReadingMark = Pick<HighlightAnnotation | CommentAnnotation, "id" | "color" | "anchor" | "orphaned">;
 
 interface InstallReadingHighlightsOptions {
   root: HTMLElement;
@@ -29,7 +29,12 @@ interface RenderedRange {
   end: number;
 }
 
-const MARK_SELECTOR = ".axl-reading-highlight";
+interface NormalizedIndex {
+  text: string;
+  map: number[];
+}
+
+const MARK_SELECTOR = ".axl-reading-highlight, mark.axl-highlight";
 const MOBILE_RENDER_DELAYS = [0, 80, 220, 520, 900];
 const DESKTOP_RENDER_DELAYS = [0, 40, 160];
 
@@ -49,7 +54,7 @@ export function installReadingViewHighlights(options: InstallReadingHighlightsOp
 
     frame = requestAnimationFrame(() => {
       frame = null;
-      renderReadingHighlights(options.root, options.marks);
+      refreshReadingViewHighlights(options.root, options.marks);
     });
   };
 
@@ -78,17 +83,78 @@ export function installReadingViewHighlights(options: InstallReadingHighlightsOp
   options.context.addChild(component);
 }
 
+export function refreshReadingViewHighlights(root: HTMLElement, marks: ReadingMark[]): void {
+  unwrapReadingHighlights(root);
+  renderReadingHighlights(root, marks);
+  renderCalloutReadingHighlights(root, marks);
+}
+
 function renderReadingHighlights(root: HTMLElement, marks: ReadingMark[]): void {
   const liveMarks = marks
     .filter((mark) => !mark.orphaned && mark.anchor.selectedText.trim())
     .sort((left, right) => right.anchor.selectedText.length - left.anchor.selectedText.length);
 
   for (const mark of liveMarks) {
-    if (root.querySelector(`${MARK_SELECTOR}[data-axl-id="${cssEscape(mark.id)}"]`)) {
+    if (root.querySelector(highlightSelectorForId(mark.id))) {
       continue;
     }
 
     wrapRenderedAnchor(root, mark.anchor, mark.color, mark.id);
+  }
+}
+
+function renderCalloutReadingHighlights(root: HTMLElement, marks: ReadingMark[]): void {
+  const callouts = calloutRoots(root);
+  if (!callouts.length) {
+    return;
+  }
+
+  const liveMarks = marks
+    .filter((mark) => !mark.orphaned && mark.anchor.selectedText.trim())
+    .sort((left, right) => right.anchor.selectedText.length - left.anchor.selectedText.length);
+
+  for (const callout of callouts) {
+    for (const mark of liveMarks) {
+      if (root.querySelector(highlightSelectorForId(mark.id))) {
+        continue;
+      }
+
+      wrapRenderedAnchor(callout, mark.anchor, mark.color, mark.id);
+    }
+  }
+}
+
+function calloutRoots(root: HTMLElement): HTMLElement[] {
+  const roots = new Set<HTMLElement>();
+
+  if (root.matches(".callout")) {
+    roots.add(root);
+  }
+
+  const parentCallout = root.closest<HTMLElement>(".callout");
+  if (parentCallout) {
+    roots.add(parentCallout);
+  }
+
+  for (const callout of Array.from(root.querySelectorAll<HTMLElement>(".callout"))) {
+    roots.add(callout);
+  }
+
+  return Array.from(roots);
+}
+
+function unwrapReadingHighlights(root: HTMLElement): void {
+  for (const mark of Array.from(root.querySelectorAll<HTMLElement>(MARK_SELECTOR))) {
+    const parent = mark.parentNode;
+    if (!parent) {
+      continue;
+    }
+
+    while (mark.firstChild) {
+      parent.insertBefore(mark.firstChild, mark);
+    }
+    parent.removeChild(mark);
+    parent.normalize();
   }
 }
 
@@ -115,10 +181,15 @@ function locateRenderedRange(renderedText: string, anchor: TextAnchor): Rendered
     };
   }
 
+  const normalized = locateNormalizedRange(renderedText, anchor.selectedText);
+  if (normalized) {
+    return normalized;
+  }
+
   const fuzzy = findBestFuzzyMatch(
     renderedText,
     anchor.selectedText,
-    Math.min(anchor.startOffset, Math.max(0, renderedText.length - anchor.selectedText.length)),
+    0,
   );
   if (!fuzzy || fuzzy.confidence < 0.55) {
     return null;
@@ -130,13 +201,69 @@ function locateRenderedRange(renderedText: string, anchor: TextAnchor): Rendered
   };
 }
 
+function locateNormalizedRange(renderedText: string, selectedText: string): RenderedRange | null {
+  const rendered = normalizeWithMap(renderedText);
+  const selected = normalizeWithMap(selectedText);
+  if (!rendered.text || !selected.text) {
+    return null;
+  }
+
+  const normalizedStart = rendered.text.indexOf(selected.text);
+  if (normalizedStart < 0) {
+    return null;
+  }
+
+  const normalizedEnd = normalizedStart + selected.text.length - 1;
+  const start = rendered.map[normalizedStart];
+  const end = rendered.map[normalizedEnd] + 1;
+  if (start === undefined || end === undefined || start >= end) {
+    return null;
+  }
+
+  return { start, end };
+}
+
+function normalizeWithMap(value: string): NormalizedIndex {
+  let text = "";
+  const map: number[] = [];
+  let pendingSpace = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (/\s/.test(char)) {
+      pendingSpace = text.length > 0;
+      continue;
+    }
+
+    if (pendingSpace) {
+      text += " ";
+      map.push(index);
+      pendingSpace = false;
+    }
+
+    text += char.toLowerCase();
+    map.push(index);
+  }
+
+  return { text: text.trim(), map };
+}
+
 function collectText(root: HTMLElement): { text: string; segments: TextSegment[] } {
   const segments: TextSegment[] = [];
   let text = "";
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
-      if (!parent || parent.closest(`${MARK_SELECTOR}, script, style, textarea, input`)) {
+      if (!parent) {
+        return NodeFilter.FILTER_REJECT;
+      }
+
+      const tag = parent.tagName.toLowerCase();
+      if (["script", "style"].includes(tag)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+
+      if (parent.closest(`${MARK_SELECTOR}, mark.axl-highlight, pre, textarea, input`)) {
         return NodeFilter.FILTER_REJECT;
       }
 
@@ -174,9 +301,10 @@ function wrapRange(segments: TextSegment[], range: RenderedRange, color: Annotat
 
     const selected = splitTextRange(segment.node, localStart, localEnd);
     const mark = document.createElement("mark");
-    mark.className = "axl-reading-highlight axl-highlight";
+    mark.className = `axl-reading-highlight axl-highlight axl-highlight--${color}`;
     mark.dataset.axlColor = color;
     mark.dataset.axlId = id;
+    mark.style.setProperty("background-color", highlightBackground(color), "important");
     mark.tabIndex = 0;
     selected.parentNode?.insertBefore(mark, selected);
     mark.appendChild(selected);
@@ -199,6 +327,19 @@ function splitTextRange(node: Text, start: number, end: number): Text {
   return selected;
 }
 
+function highlightBackground(color: string): string {
+  const colors: Record<string, string> = {
+    yellow: "rgba(245, 197, 24, 0.42)",
+    orange: "rgba(255, 140, 0, 0.36)",
+    pink: "rgba(255, 105, 180, 0.32)",
+    green: "rgba(82, 196, 26, 0.30)",
+    blue: "rgba(22, 119, 255, 0.28)",
+    purple: "rgba(114, 46, 209, 0.30)",
+  };
+
+  return colors[color] ?? colors.yellow;
+}
+
 function isOwnHighlightMutation(mutation: MutationRecord): boolean {
   const target = mutation.target;
   if (target instanceof HTMLElement && target.closest(MARK_SELECTOR)) {
@@ -216,4 +357,9 @@ function cssEscape(value: string): string {
   }
 
   return value.replace(/["\\]/g, "\\$&");
+}
+
+function highlightSelectorForId(id: string): string {
+  const escaped = cssEscape(id);
+  return `.axl-reading-highlight[data-axl-id="${escaped}"], mark.axl-highlight[data-axl-id="${escaped}"]`;
 }
