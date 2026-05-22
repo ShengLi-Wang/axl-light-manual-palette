@@ -31,6 +31,8 @@ https://github.com/little-pond/axl-light
 
 ### Quick Install
 
+#### macOS / Linux
+
 Run this in Terminal. Replace the path with your Obsidian vault path:
 
 ```bash
@@ -40,6 +42,19 @@ curl -fsSL https://raw.githubusercontent.com/little-pond/axl-light/main/scripts/
 Then restart Obsidian, open Settings → Community plugins, and enable Axl Light.
 
 ![Install Axl Light from Terminal](docs/images/install-axl-light-command.png)
+
+#### Windows PowerShell
+
+Run this in PowerShell. Replace the path with your Obsidian vault path:
+
+```powershell
+$vault = "$HOME\Documents\Obsidian Vault"
+$script = "$env:TEMP\install-axl-light.ps1"
+Invoke-WebRequest https://raw.githubusercontent.com/little-pond/axl-light/main/scripts/install.ps1 -OutFile $script
+powershell -ExecutionPolicy Bypass -File $script $vault
+```
+
+If your PowerShell blocks remote scripts, use the manual install below.
 
 ### Manual Install
 
