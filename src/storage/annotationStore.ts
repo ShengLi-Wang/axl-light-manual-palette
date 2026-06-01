@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 obsidian App/Vault/Adapter 的文件读写能力，依赖 storage/types 的 sidecar JSON 合约
- * [OUTPUT]: 对外提供 AnnotationStore，负责 Markdown/PDF 的 .obsidian-annotations sidecar 文件、索引、缓存与导出
+ * [OUTPUT]: 对外提供 AnnotationStore，负责短文件名 sidecar、索引、缓存、迁移与导出
  * [POS]: storage 模块的唯一持久化入口，隔离原始 Markdown 与注释数据
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -20,6 +20,10 @@ import {
 
 const STORE_DIR = ".obsidian-annotations";
 const INDEX_PATH = normalizePath(`${STORE_DIR}/index.json`);
+const SIDECAR_SLUG_MAX_LENGTH = 72;
+const FNV_OFFSET_BASIS = 0xcbf29ce484222325n;
+const FNV_PRIME = 0x100000001b3n;
+const FNV_MASK = 0xffffffffffffffffn;
 
 export class AnnotationStore {
   private readonly documents = new Map<string, FileAnnotationDocument>();
@@ -51,8 +55,8 @@ export class AnnotationStore {
 
     const sidecarPath = this.toSidecarPath(filePath);
     const fallback = await this.createEmptyDocument(file);
-    const document = await this.readJson<FileAnnotationDocument>(sidecarPath, fallback);
-    this.documents.set(cacheKey, this.normalizeDocument(document, filePath));
+    const document = await this.readDocumentForPath(filePath, sidecarPath, fallback);
+    this.documents.set(cacheKey, document);
     return this.documents.get(cacheKey)!;
   }
 
@@ -62,6 +66,7 @@ export class AnnotationStore {
     const normalized = this.normalizeDocument(document, filePath);
     await this.ensureStoreDir();
     await this.app.vault.adapter.write(sidecarPath, JSON.stringify(normalized, null, 2));
+    await this.deleteLegacySidecar(filePath, sidecarPath);
 
     this.documents.set(this.toCacheKey(normalized.filePath), normalized);
     this.index.files[normalized.filePath] = this.toIndexEntry(normalized, sidecarPath);
@@ -186,21 +191,20 @@ export class AnnotationStore {
 
   async migrateFilePath(oldPath: string, file: TFile): Promise<void> {
     const normalizedOldPath = this.normalizeVaultPath(oldPath);
-    const oldSidecar = this.toSidecarPath(normalizedOldPath);
-    const oldDocument = await this.readJson<FileAnnotationDocument | null>(oldSidecar, null);
-    if (!oldDocument) {
+    const oldDocument = await this.readExistingDocument(normalizedOldPath);
+    if (!oldDocument.document) {
       return;
     }
 
     const nextDocument: FileAnnotationDocument = {
-      ...oldDocument,
+      ...oldDocument.document,
       filePath: this.normalizeVaultPath(file.path),
       fileHash: await this.hashFile(file),
       lastModified: new Date().toISOString(),
     };
 
     await this.saveDocument(nextDocument);
-    await this.deleteIfExists(oldSidecar);
+    await this.deleteSidecarsForPath(normalizedOldPath, new Set([this.toSidecarPath(nextDocument.filePath)]));
     delete this.index.files[normalizedOldPath];
     await this.writeIndex();
     this.documents.delete(this.toCacheKey(normalizedOldPath));
@@ -267,7 +271,7 @@ export class AnnotationStore {
   }
 
   async hashFile(file: TFile): Promise<string> {
-    if (file.extension === "md") {
+    if (file.extension.toLowerCase() === "md") {
       return this.hashString(await this.app.vault.cachedRead(file));
     }
 
@@ -276,12 +280,10 @@ export class AnnotationStore {
   }
 
   toSidecarPath(filePath: string): string {
-    const safeName = this.normalizeVaultPath(filePath)
-      .toLowerCase()
-      .split(/[\\/]/)
-      .map((part) => encodeURIComponent(part))
-      .join("__");
-    return normalizePath(`${STORE_DIR}/${safeName}.json`);
+    const normalizedPath = this.normalizeVaultPath(filePath).toLowerCase();
+    const slug = this.toSidecarSlug(normalizedPath);
+    const hash = this.hashPath(normalizedPath);
+    return normalizePath(`${STORE_DIR}/axl--${slug}--${hash}.json`);
   }
 
   private async createEmptyDocument(file: TFile): Promise<FileAnnotationDocument> {
@@ -331,6 +333,43 @@ export class AnnotationStore {
     await this.app.vault.adapter.write(INDEX_PATH, JSON.stringify(this.index, null, 2));
   }
 
+  private async readDocumentForPath(
+    filePath: string,
+    sidecarPath: string,
+    fallback: FileAnnotationDocument,
+  ): Promise<FileAnnotationDocument> {
+    const existing = await this.readExistingDocument(filePath);
+    if (!existing.document) {
+      return fallback;
+    }
+
+    const normalized = this.normalizeDocument(existing.document, filePath);
+    const existingSidecarPath = existing.sidecarPath;
+    if (existingSidecarPath && existingSidecarPath !== sidecarPath) {
+      await this.ensureStoreDir();
+      await this.app.vault.adapter.write(sidecarPath, JSON.stringify(normalized, null, 2));
+      await this.deleteIfExists(existingSidecarPath);
+      this.index.files[normalized.filePath] = this.toIndexEntry(normalized, sidecarPath);
+      await this.writeIndex();
+      this.changeVersion += 1;
+    }
+
+    return normalized;
+  }
+
+  private async readExistingDocument(
+    filePath: string,
+  ): Promise<{ document: FileAnnotationDocument | null; sidecarPath: string | null }> {
+    for (const sidecarPath of this.toCandidateSidecarPaths(filePath)) {
+      const document = await this.readJson<FileAnnotationDocument | null>(sidecarPath, null);
+      if (document) {
+        return { document, sidecarPath };
+      }
+    }
+
+    return { document: null, sidecarPath: null };
+  }
+
   private async readJson<T>(path: string, fallback: T): Promise<T> {
     const normalizedPath = normalizePath(path);
     if (!(await this.app.vault.adapter.exists(normalizedPath))) {
@@ -351,12 +390,63 @@ export class AnnotationStore {
     }
   }
 
+  private async deleteLegacySidecar(filePath: string, currentSidecarPath: string): Promise<void> {
+    await this.deleteSidecarsForPath(filePath, new Set([currentSidecarPath]));
+  }
+
   private normalizeVaultPath(filePath: string): string {
     return normalizePath(filePath);
   }
 
   private toCacheKey(filePath: string): string {
     return this.normalizeVaultPath(filePath).toLowerCase();
+  }
+
+  private toCandidateSidecarPaths(filePath: string): string[] {
+    return Array.from(new Set([this.toSidecarPath(filePath), this.toLegacySidecarPath(filePath)]));
+  }
+
+  private toLegacySidecarPath(filePath: string): string {
+    const safeName = this.normalizeVaultPath(filePath)
+      .toLowerCase()
+      .split(/[\\/]/)
+      .map((part) => encodeURIComponent(part))
+      .join("__");
+    return normalizePath(`${STORE_DIR}/${safeName}.json`);
+  }
+
+  private toSidecarSlug(filePath: string): string {
+    const slug = filePath
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .join("__")
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/_{3,}/g, "__")
+      .replace(/^[.-]+|[.-]+$/g, "")
+      .slice(0, SIDECAR_SLUG_MAX_LENGTH)
+      .replace(/[.-]+$/g, "");
+
+    return slug || "file";
+  }
+
+  private async deleteSidecarsForPath(filePath: string, keepPaths: Set<string>): Promise<void> {
+    for (const sidecarPath of this.toCandidateSidecarPaths(filePath)) {
+      if (!keepPaths.has(sidecarPath)) {
+        await this.deleteIfExists(sidecarPath);
+      }
+    }
+  }
+
+  private hashPath(filePath: string): string {
+    let hash = FNV_OFFSET_BASIS;
+
+    for (let index = 0; index < filePath.length; index += 1) {
+      hash ^= BigInt(filePath.charCodeAt(index));
+      hash = (hash * FNV_PRIME) & FNV_MASK;
+    }
+
+    return hash.toString(16).padStart(16, "0");
   }
 
   private async hashString(content: string): Promise<string> {

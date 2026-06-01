@@ -13,11 +13,13 @@ Axl Light is a non-invasive Obsidian reading annotation plugin for Markdown and 
 - Inline editing for sticky notes and sidebar notes
 - Sidebar overview with search, color filtering, sorting, jump, delete, add-note, and export
 - Sidecar JSON storage with fuzzy text-anchor relocation
-- Windows-safe path normalization and rename migration handling
+- Windows-safe short sidecar filenames with legacy path migration
 
 ## Installation
 
 ### BRAT
+
+Recommended for Windows users who do not want to touch the terminal.
 
 1. Install the Obsidian BRAT plugin.
 2. Run `BRAT: Add a beta plugin for testing`.
@@ -43,18 +45,27 @@ Then restart Obsidian, open Settings → Community plugins, and enable Axl Light
 
 ![Install Axl Light from Terminal](docs/images/install-axl-light-command.png)
 
-#### Windows PowerShell
+#### Windows
 
-Run this in PowerShell. Replace the path with your Obsidian vault path:
+Run this in PowerShell. It will prompt for your Obsidian vault folder and uses your Documents folder as the default when it can:
 
 ```powershell
-$vault = "$HOME\Documents\Obsidian Vault"
-$script = "$env:TEMP\install-axl-light.ps1"
-Invoke-WebRequest https://raw.githubusercontent.com/little-pond/axl-light/main/scripts/install.ps1 -OutFile $script
-powershell -ExecutionPolicy Bypass -File $script $vault
+$script = Join-Path $env:TEMP "install-axl-light.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/little-pond/axl-light/main/scripts/install.ps1" -OutFile $script
+powershell -NoProfile -ExecutionPolicy Bypass -File $script
 ```
 
-If your PowerShell blocks remote scripts, use the manual install below.
+To skip the prompt, pass the vault path:
+
+```powershell
+$script = Join-Path $env:TEMP "install-axl-light.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/little-pond/axl-light/main/scripts/install.ps1" -OutFile $script
+powershell -NoProfile -ExecutionPolicy Bypass -File $script "C:\Users\your-name\Documents\Obsidian Vault"
+```
+
+If you downloaded this repository for development, you can also double-click `scripts\install.cmd`; it opens the same Windows installer prompt.
+
+If PowerShell still blocks the script, use BRAT or the manual install below.
 
 ### Manual Install
 
@@ -65,8 +76,19 @@ If your PowerShell blocks remote scripts, use the manual install below.
    - `manifest.json`
    - `styles.css`
 
-2. Move them to:
-   `<your-vault>/.obsidian/plugins/axl-light/`
+2. Move them to the plugin folder:
+
+   macOS / Linux:
+
+   ```text
+   <your-vault>/.obsidian/plugins/axl-light/
+   ```
+
+   Windows:
+
+   ```text
+   C:\Users\your-name\Documents\Obsidian Vault\.obsidian\plugins\axl-light\
+   ```
 
 3. Restart Obsidian
 
@@ -106,11 +128,12 @@ Axl Light stores annotations in your vault:
 ```text
 .obsidian-annotations/
   index.json
-  notes__reading__book.md.json
-  papers__example.pdf.json
+  axl--notes__reading__book.md--7b85f6b1c02a41f7.json
+  axl--papers__example.pdf--5af1299d722f61e0.json
 ```
 
 The sidecar files contain anchors, selected text, colors, sticky note content, optional titles, timestamps, and PDF page rectangles.
+The filenames are intentionally short and Windows-safe; the original vault path lives inside the JSON and `index.json`. Older long sidecar filenames are migrated automatically when Axl Light reads them.
 
 Your original `.md` and `.pdf` files remain unchanged. If you disable or remove the plugin, your documents stay clean.
 

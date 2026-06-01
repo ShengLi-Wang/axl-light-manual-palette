@@ -1,11 +1,11 @@
 /**
  * [INPUT]: 依赖 Obsidian Plugin API、CM6 扩展、sidecar AnnotationStore、锚点算法、视图与设置模块
- * [OUTPUT]: 对外提供 OverlayAnnotationsPlugin 主类，注册 ribbon 图标、命令、浮动工具栏、高亮、窄屏弹层、侧栏、设置和 vault 事件
+ * [OUTPUT]: 对外提供 OverlayAnnotationsPlugin 主类，注册跨平台选区、重命名迁移、剪贴板、侧栏与 vault 事件
  * [POS]: 插件装配根，协调模块但不修改用户 Markdown 原文
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
 
-import { addIcon, Editor, MarkdownPostProcessorContext, MarkdownView, Modal, Notice, Plugin, TFile } from "obsidian";
+import { addIcon, Editor, MarkdownPostProcessorContext, MarkdownView, Notice, Plugin, TFile } from "obsidian";
 
 import { createTextAnchor, relocateDocumentAnchors } from "./src/anchor/textAnchor";
 import { createHighlightExtension } from "./src/editor/highlightExtension";
@@ -23,18 +23,8 @@ import {
   SelectionSnapshot,
 } from "./src/storage/types";
 import { AnnotationPopover } from "./src/views/annotationPopover";
+import { CommentModal } from "./src/views/commentModal";
 import { ANNOTATION_SIDEBAR_VIEW, AnnotationSidebarView } from "./src/views/sidebarView";
-
-interface CommentModalValue {
-  title: string;
-  content: string;
-}
-
-const NOTE_TITLE_OPTIONS = [
-  { value: "Insight", label: "💡 Insight" },
-  { value: "Question", label: "❓ Question" },
-  { value: "Reminder", label: "🔔 Reminder" },
-] as const;
 
 const AXL_LIGHT_ICON = `
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
@@ -57,7 +47,7 @@ export default class OverlayAnnotationsPlugin extends Plugin {
   private popover!: AnnotationPopover;
   private pdfLayer!: PdfAnnotationLayer;
   private lastSelection: SelectionSnapshot | null = null;
-  private renameMigrationTimer: number | null = null;
+  private readonly renameMigrationTimers = new Map<string, number>();
 
   async onload(): Promise<void> {
     addIcon("axl-light-icon", AXL_LIGHT_ICON);
@@ -116,9 +106,10 @@ export default class OverlayAnnotationsPlugin extends Plugin {
   }
 
   onunload(): void {
-    if (this.renameMigrationTimer !== null) {
-      window.clearTimeout(this.renameMigrationTimer);
+    for (const timer of this.renameMigrationTimers.values()) {
+      window.clearTimeout(timer);
     }
+    this.renameMigrationTimers.clear();
     this.toolbar?.destroy();
     this.popover?.destroy();
     this.app.workspace.detachLeavesOfType(ANNOTATION_SIDEBAR_VIEW);
@@ -198,7 +189,7 @@ export default class OverlayAnnotationsPlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on("modify", async (file) => {
-        if (!(file instanceof TFile) || file.extension !== "md") {
+        if (!(file instanceof TFile) || !isMarkdownFile(file)) {
           return;
         }
 
@@ -216,25 +207,27 @@ export default class OverlayAnnotationsPlugin extends Plugin {
 
     this.registerEvent(
       this.app.vault.on("rename", async (file, oldPath) => {
-        if (!this.settings.migrateOnRename || !(file instanceof TFile) || file.extension !== "md") {
+        if (!this.settings.migrateOnRename || !(file instanceof TFile) || !isAnnotatableFile(file)) {
           return;
         }
 
-        if (this.renameMigrationTimer !== null) {
-          window.clearTimeout(this.renameMigrationTimer);
+        const existingTimer = this.renameMigrationTimers.get(oldPath);
+        if (existingTimer !== undefined) {
+          window.clearTimeout(existingTimer);
         }
 
-        this.renameMigrationTimer = window.setTimeout(async () => {
+        const timer = window.setTimeout(async () => {
           await this.store.migrateFilePath(oldPath, file);
           await this.refreshAnnotations();
-          this.renameMigrationTimer = null;
+          this.renameMigrationTimers.delete(oldPath);
         }, 100);
+        this.renameMigrationTimers.set(oldPath, timer);
       }),
     );
 
     this.registerEvent(
       this.app.workspace.on("file-open", async (file) => {
-        if (file instanceof TFile && ["md", "pdf"].includes(file.extension.toLowerCase())) {
+        if (file instanceof TFile && isAnnotatableFile(file)) {
           this.popover.hide();
           await this.store.getDocument(file);
           await this.refreshAnnotations();
@@ -366,7 +359,7 @@ export default class OverlayAnnotationsPlugin extends Plugin {
 
   private async resolveSelection(): Promise<SelectionSnapshot | null> {
     const editor = this.activeEditor();
-    if (editor?.file) {
+    if (editor?.file && isMarkdownFile(editor.file)) {
       const selectedText = editor.editor.getSelection();
       if (selectedText) {
         const from = editor.editor.posToOffset(editor.editor.getCursor("from"));
@@ -380,7 +373,7 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     const selection = window.getSelection();
     const selectedText = selection?.toString().replace(/\r\n/g, "\n").trim() ?? "";
 
-    if (file && selectedText) {
+    if (file && isMarkdownFile(file) && selectedText) {
       const source = await this.app.vault.cachedRead(file);
       const located = locateRenderedSelectionInSource(
         source,
@@ -400,7 +393,11 @@ export default class OverlayAnnotationsPlugin extends Plugin {
       }
     }
 
-    return this.lastSelection;
+    if (this.lastSelection && file?.path === this.lastSelection.filePath) {
+      return this.lastSelection;
+    }
+
+    return null;
   }
 
   private activeEditor(): { editor: Editor; file: TFile | null } | null {
@@ -421,11 +418,15 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
 
-  private copySelection(): void {
+  private async copySelection(): Promise<void> {
     const text = window.getSelection()?.toString() || this.activeEditor()?.editor.getSelection() || "";
     if (text) {
-      navigator.clipboard.writeText(text);
-      new Notice("Copied selection");
+      try {
+        await writeClipboardText(text);
+        new Notice("Copied selection");
+      } catch {
+        new Notice("Copy failed. Use Ctrl+C instead.");
+      }
     }
   }
 
@@ -502,22 +503,24 @@ function locateRenderedSelectionInSource(
   occurrenceIndex = 0,
   preferRendered = false,
 ): { startOffset: number; endOffset: number } | null {
-  const exact = nthIndexOf(source, selectedText, occurrenceIndex);
+  const normalizedSource = normalizeLineEndings(source);
+  const normalizedSelectedText = normalizeLineEndings(selectedText);
+  const exact = nthIndexOf(normalizedSource, normalizedSelectedText, occurrenceIndex);
   if (exact >= 0) {
     return {
       startOffset: exact,
-      endOffset: exact + selectedText.length,
+      endOffset: exact + normalizedSelectedText.length,
     };
   }
 
   if (preferRendered) {
-    const rendered = locateSelectionIgnoringQuoteMarkers(source, selectedText, occurrenceIndex);
+    const rendered = locateSelectionIgnoringQuoteMarkers(normalizedSource, normalizedSelectedText, occurrenceIndex);
     if (rendered) {
       return rendered;
     }
   }
 
-  return locateSelectionIgnoringQuoteMarkers(source, selectedText, occurrenceIndex);
+  return locateSelectionIgnoringQuoteMarkers(normalizedSource, normalizedSelectedText, occurrenceIndex);
 }
 
 function createAnchorForSnapshot(source: string, snapshot: SelectionSnapshot) {
@@ -576,15 +579,16 @@ function locateSelectionIgnoringQuoteMarkers(
   selectedText: string,
   occurrenceIndex = 0,
 ): { startOffset: number; endOffset: number } | null {
-  const normalizedSelection = selectedText.replace(/\r\n/g, "\n");
+  const normalizedSource = normalizeLineEndings(source);
+  const normalizedSelection = normalizeLineEndings(selectedText);
   const sourceToRendered: number[] = [];
   let rendered = "";
   let lineStart = true;
   let quotePrefix = false;
   let index = 0;
 
-  while (index < source.length) {
-    const char = source[index];
+  while (index < normalizedSource.length) {
+    const char = normalizedSource[index];
 
     if (lineStart && char === ">") {
       quotePrefix = true;
@@ -599,8 +603,8 @@ function locateSelectionIgnoringQuoteMarkers(
       continue;
     }
 
-    if (!quotePrefix && char === "[" && source.slice(index).match(/^\[![\w-]+\]/)) {
-      while (index < source.length && source[index] !== "\n") {
+    if (!quotePrefix && char === "[" && normalizedSource.slice(index).match(/^\[![\w-]+\]/)) {
+      while (index < normalizedSource.length && normalizedSource[index] !== "\n") {
         index += 1;
       }
       quotePrefix = false;
@@ -704,66 +708,34 @@ function nthIndexOf(source: string, target: string, occurrenceIndex: number): nu
   return -1;
 }
 
-class CommentModal extends Modal {
-  private value: CommentModalValue | null = null;
-  private resolve!: (value: CommentModalValue | null) => void;
-
-  constructor(
-    app: OverlayAnnotationsPlugin["app"],
-    private readonly initialTitle: string,
-    private readonly initialContent: string,
-  ) {
-    super(app);
-  }
-
-  openAndRead(): Promise<CommentModalValue | null> {
-    this.open();
-    return new Promise((resolve) => {
-      this.resolve = resolve;
-    });
-  }
-
-  onOpen(): void {
-    this.contentEl.empty();
-    this.contentEl.createEl("h2", { text: "Sticky note" });
-
-    const titleRow = this.contentEl.createDiv({ cls: "axl-modal-row" });
-    titleRow.createEl("label", { cls: "axl-modal-label", text: "Type" });
-    const title = titleRow.createEl("select", { cls: "axl-modal-select" });
-    for (const option of NOTE_TITLE_OPTIONS) {
-      title.createEl("option", { text: option.label, attr: { value: option.value } });
-    }
-    title.value = normalizedNoteTitle(this.initialTitle);
-
-    const contentRow = this.contentEl.createDiv({ cls: "axl-modal-row" });
-    contentRow.createEl("label", { cls: "axl-modal-label", text: "Note" });
-    const input = contentRow.createEl("textarea", {
-      cls: "axl-modal-textarea",
-      attr: { rows: "8", placeholder: "Write your thoughts..." },
-    });
-    input.value = this.initialContent;
-
-    const actions = this.contentEl.createDiv({ cls: "axl-modal-actions" });
-    const cancel = actions.createEl("button", { text: "Cancel", cls: "axl-modal-cancel", attr: { type: "button" } });
-    const save = actions.createEl("button", { text: "Save", cls: "axl-modal-save", attr: { type: "button" } });
-    cancel.addEventListener("click", () => {
-      this.value = null;
-      this.close();
-    });
-    save.addEventListener("click", () => {
-      this.value = {
-        title: title.value.trim(),
-        content: input.value.trim(),
-      };
-      this.close();
-    });
-  }
-
-  onClose(): void {
-    this.resolve?.(this.value);
-  }
+function isMarkdownFile(file: TFile): boolean {
+  return file.extension.toLowerCase() === "md";
 }
 
-function normalizedNoteTitle(value: string): string {
-  return NOTE_TITLE_OPTIONS.some((option) => option.value === value) ? value : NOTE_TITLE_OPTIONS[0].value;
+function isAnnotatableFile(file: TFile): boolean {
+  return ["md", "pdf"].includes(file.extension.toLowerCase());
+}
+
+function normalizeLineEndings(content: string): string {
+  return content.replace(/\r\n/g, "\n");
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    const textarea = document.body.createEl("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    try {
+      textarea.select();
+      if (!document.execCommand("copy")) {
+        throw new Error("execCommand copy failed");
+      }
+    } finally {
+      textarea.remove();
+    }
+  }
 }

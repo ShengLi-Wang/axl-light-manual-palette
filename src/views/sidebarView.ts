@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Obsidian ItemView、AnnotationStore 数据与插件主类回调
- * [OUTPUT]: 对外提供 AnnotationSidebarView，将 highlight 与关联 note 合并为同一张总览卡片
+ * [OUTPUT]: 对外提供 AnnotationSidebarView，仅为 Markdown/PDF 文件渲染 highlight 与关联 note 总览
  * [POS]: views 模块的右侧 Leaf 总览面板，是 sticky lane 移除后的主注释工作台
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -122,7 +122,7 @@ export class AnnotationSidebarView extends ItemView {
     this.renderHeader(container);
     this.renderControls(container);
 
-    if (!file) {
+    if (!file || !isAnnotatableFile(file)) {
       container.createDiv({ cls: "axl-empty", text: "Open a Markdown or PDF file to inspect annotations." });
       return;
     }
@@ -707,4 +707,8 @@ function isCodeAnchor(anchor: HighlightAnnotation["anchor"] | PdfHighlightAnnota
 
 function isCodeLikeText(text: string): boolean {
   return /^[ \t]{2,}/m.test(text) || /\n[ \t]{2,}\S/.test(text);
+}
+
+function isAnnotatableFile(file: TFile): boolean {
+  return ["md", "pdf"].includes(file.extension.toLowerCase());
 }
