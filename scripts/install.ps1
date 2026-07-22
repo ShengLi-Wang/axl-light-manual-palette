@@ -1,5 +1,5 @@
 <#
-  [INPUT]: Uses PowerShell Invoke-WebRequest, an optional user-provided vault path, and Windows profile folders.
+  [INPUT]: Uses PowerShell Invoke-WebRequest, the manual-palette fork release, an optional vault path, and Windows profile folders.
   [OUTPUT]: Downloads and verifies main.js, manifest.json, and styles.css into the vault plugin folder.
   [POS]: Windows installer companion to scripts/install.sh, optimized for paste-and-run and prompt-driven installs.
   [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
@@ -17,7 +17,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$Repo = "little-pond/axl-light"
+$Repo = "ShengLi-Wang/axl-light-manual-palette"
 $PluginId = "axl-light"
 $Assets = @("main.js", "manifest.json", "styles.css")
 

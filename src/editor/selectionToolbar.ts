@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 DOM selection 与 Obsidian 命令回调，接收高亮颜色与便签动作
- * [OUTPUT]: 对外提供 SelectionToolbar，在选中文本附近显示非侵入式阅读工具条
+ * [OUTPUT]: 对外提供可按需显示的 SelectionToolbar，在选中文本附近显示非侵入式阅读工具条
  * [POS]: editor 模块的交互入口，被 main.ts 装配并调用
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -17,34 +17,29 @@ interface SelectionToolbarOptions {
 export class SelectionToolbar {
   private readonly element: HTMLElement;
   private visible = false;
-  private readonly handleMouseUp = (): void => {
-    window.setTimeout(() => this.showForSelection(), 0);
-  };
 
   constructor(private readonly options: SelectionToolbarOptions) {
     this.element = document.body.createDiv({ cls: "axl-toolbar axl-selection-toolbar" });
     this.render();
     this.hide();
-    document.addEventListener("mouseup", this.handleMouseUp);
   }
 
   destroy(): void {
-    document.removeEventListener("mouseup", this.handleMouseUp);
     this.element.remove();
   }
 
-  showForSelection(): void {
+  showForSelection(): boolean {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
       this.hide();
-      return;
+      return false;
     }
 
     const text = selection.toString().trim();
     const range = selection.getRangeAt(0);
     if (!text || !isSelectionInsideWorkspace(range)) {
       this.hide();
-      return;
+      return false;
     }
 
     const rect = range.getBoundingClientRect();
@@ -52,6 +47,7 @@ export class SelectionToolbar {
     this.element.style.top = `${Math.max(8, rect.top - 46)}px`;
     this.element.toggleClass("is-visible", true);
     this.visible = true;
+    return true;
   }
 
   hide(): void {

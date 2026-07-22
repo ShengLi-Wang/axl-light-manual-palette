@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Obsidian 插件设置与 sidecar JSON 存储协议的领域约束
- * [OUTPUT]: 对外提供 Markdown/PDF 注释、高亮、锚点、响应式阅读设置、索引与存储文档类型
+ * [OUTPUT]: 对外提供 Markdown/PDF 注释、高亮、锚点、响应式阅读与工具条设置、索引与存储文档类型
  * [POS]: storage 模块的类型真相源，被 editor、views、anchor、settings 和 store 共享
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -134,6 +134,7 @@ export interface AnnotationIndex {
 }
 
 export interface AnnotationPluginSettings {
+  autoShowSelectionToolbar: boolean;
   defaultHighlightColor: AnnotationColor;
   stickyWidth: number;
   stickySide: SidebarSide;
@@ -158,6 +159,7 @@ export interface AnnotationStoreSnapshot {
 }
 
 export const DEFAULT_SETTINGS: AnnotationPluginSettings = {
+  autoShowSelectionToolbar: false,
   defaultHighlightColor: "yellow",
   stickyWidth: 280,
   stickySide: "right",

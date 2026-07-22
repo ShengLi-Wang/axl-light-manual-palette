@@ -4,11 +4,13 @@ Axl Light is a non-invasive Obsidian reading annotation plugin for Markdown and 
 
 **This plugin never modifies your Markdown or PDF files.** Annotation data is stored separately in sidecar JSON files under `.obsidian-annotations/`.
 
+This fork keeps text selection quiet by default. Select text and press `Alt+H` to open the six-color highlight palette only when you need it. The original automatic behavior remains available as a setting. It is based on the [upstream Axl Light project](https://github.com/little-pond/axl-light) and does not submit changes back to that repository.
+
 ## Features
 
 - Overlay highlights for Markdown Live Preview, Source Mode, Reading View, and PDFs
 - Mobile-friendly Reading View highlight recovery with delayed rendering and DOM observation
-- Floating toolbar with six colors, sticky note, copy, and annotation overview actions
+- On-demand floating toolbar with six colors, sticky note, copy, and annotation overview actions
 - Right-side sticky note lane with Markdown-rendered notes
 - Inline editing for sticky notes and sidebar notes
 - Sidebar overview with search, color filtering, sorting, jump, delete, add-note, and export
@@ -26,7 +28,7 @@ Recommended for Windows users who do not want to touch the terminal.
 3. Paste this repository URL:
 
 ```text
-https://github.com/little-pond/axl-light
+https://github.com/ShengLi-Wang/axl-light-manual-palette
 ```
 
 4. Enable `Axl Light` in `Settings -> Community plugins`.
@@ -38,7 +40,7 @@ https://github.com/little-pond/axl-light
 Run this in Terminal. Replace the path with your Obsidian vault path:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/little-pond/axl-light/main/scripts/install.sh | bash -s -- "$HOME/Documents/Obsidian Vault"
+curl -fsSL https://raw.githubusercontent.com/ShengLi-Wang/axl-light-manual-palette/main/scripts/install.sh | bash -s -- "$HOME/Documents/Obsidian Vault"
 ```
 
 Then restart Obsidian, open Settings → Community plugins, and enable Axl Light.
@@ -51,7 +53,7 @@ Run this in PowerShell. It will prompt for your Obsidian vault folder and uses y
 
 ```powershell
 $script = Join-Path $env:TEMP "install-axl-light.ps1"
-Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/little-pond/axl-light/main/scripts/install.ps1" -OutFile $script
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/ShengLi-Wang/axl-light-manual-palette/main/scripts/install.ps1" -OutFile $script
 powershell -NoProfile -ExecutionPolicy Bypass -File $script
 ```
 
@@ -59,7 +61,7 @@ To skip the prompt, pass the vault path:
 
 ```powershell
 $script = Join-Path $env:TEMP "install-axl-light.ps1"
-Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/little-pond/axl-light/main/scripts/install.ps1" -OutFile $script
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/ShengLi-Wang/axl-light-manual-palette/main/scripts/install.ps1" -OutFile $script
 powershell -NoProfile -ExecutionPolicy Bypass -File $script "C:\Users\your-name\Documents\Obsidian Vault"
 ```
 
@@ -70,7 +72,7 @@ If PowerShell still blocks the script, use BRAT or the manual install below.
 ### Manual Install
 
 1. Download these three files from the latest release:
-   https://github.com/little-pond/axl-light/releases/latest
+   https://github.com/ShengLi-Wang/axl-light-manual-palette/releases/latest
 
    - `main.js`
    - `manifest.json`
@@ -100,7 +102,9 @@ Do **not** download the source code ZIP from the green `Code` button. Obsidian n
 
 ### Highlight Text
 
-Select text in Markdown or PDF. Use the floating toolbar to choose a color, add a sticky note, copy the selection, or open the overview.
+Select text in Markdown or PDF, then press `Alt+H`. Use the floating toolbar to choose a color, add a sticky note, copy the selection, or open the overview.
+
+To restore the original selection-triggered behavior, enable `Show selection toolbar automatically` in the Axl Light settings.
 
 ![Highlight with Axl Light](docs/images/highlight-with-axl-light.png)
 
@@ -116,6 +120,7 @@ Use the annotation overview to search highlights and notes, jump back to the sou
 
 ## Commands
 
+- `Show highlight palette for selection`: `Alt + H`
 - `Highlight selected text`: `Cmd/Ctrl + Shift + H`
 - `Add sticky note to selection`: `Cmd/Ctrl + Alt + M`
 - `Toggle sticky note lane`: `Cmd/Ctrl + Shift + N`

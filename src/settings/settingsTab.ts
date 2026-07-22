@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Obsidian PluginSettingTab/Setting 与 storage/types 的设置模型
- * [OUTPUT]: 对外提供 AnnotationSettingsTab，负责默认颜色、便签栏、窄屏折叠、连接线、作者、备份、重命名迁移设置
+ * [OUTPUT]: 对外提供 AnnotationSettingsTab，负责选区工具条、默认颜色、便签栏、窄屏折叠、连接线、作者、备份、重命名迁移设置
  * [POS]: settings 模块的用户配置界面，被 main.ts 注册
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -19,6 +19,15 @@ export class AnnotationSettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Axl Light" });
+
+    new Setting(containerEl)
+      .setName("Show selection toolbar automatically")
+      .setDesc("When disabled, use the Show highlight palette for selection command.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.autoShowSelectionToolbar).onChange(async (value) => {
+          await this.plugin.setAutoShowSelectionToolbar(value);
+        });
+      });
 
     new Setting(containerEl)
       .setName("Default highlight color")

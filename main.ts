@@ -1,6 +1,6 @@
 /**
  * [INPUT]: 依赖 Obsidian Plugin API、CM6 扩展、sidecar AnnotationStore、锚点算法、视图与设置模块
- * [OUTPUT]: 对外提供 OverlayAnnotationsPlugin 主类，注册跨平台选区、重命名迁移、剪贴板、侧栏与 vault 事件
+ * [OUTPUT]: 对外提供 OverlayAnnotationsPlugin 主类，注册自动/按需选区工具条、重命名迁移、剪贴板、侧栏与 vault 事件
  * [POS]: 插件装配根，协调模块但不修改用户 Markdown 原文
  * [PROTOCOL]: 变更时更新此头部，然后检查 AGENTS.md
  */
@@ -126,6 +126,14 @@ export default class OverlayAnnotationsPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  async setAutoShowSelectionToolbar(value: boolean): Promise<void> {
+    this.settings.autoShowSelectionToolbar = value;
+    await this.saveSettings();
+    if (!value) {
+      this.toolbar?.hide();
+    }
+  }
+
   async refreshAnnotations(): Promise<void> {
     this.app.workspace.updateOptions();
     for (const leaf of this.app.workspace.getLeavesOfType(ANNOTATION_SIDEBAR_VIEW)) {
@@ -144,6 +152,17 @@ export default class OverlayAnnotationsPlugin extends Plugin {
   }
 
   private registerCommands(): void {
+    this.addCommand({
+      id: "show-highlight-palette",
+      name: "Show highlight palette for selection",
+      hotkeys: [{ modifiers: ["Alt"], key: "h" }],
+      callback: () => {
+        if (!this.toolbar.showForSelection()) {
+          new Notice("Select text first.");
+        }
+      },
+    });
+
     this.addCommand({
       id: "highlight-selection",
       name: "Highlight selected text",
@@ -177,10 +196,24 @@ export default class OverlayAnnotationsPlugin extends Plugin {
   }
 
   private registerEvents(): void {
-    this.registerDomEvent(document, "selectionchange", () => this.toolbar.showForSelection());
+    this.registerDomEvent(document, "selectionchange", () => {
+      if (this.settings.autoShowSelectionToolbar) {
+        this.toolbar.showForSelection();
+      }
+    });
     this.registerDomEvent(document, "mousedown", (event) => {
-      if (!(event.target instanceof HTMLElement) || !event.target.closest(".axl-selection-toolbar")) {
+      if (!isSelectionToolbarTarget(event.target)) {
+        this.toolbar.hide();
+      }
+    });
+    this.registerDomEvent(document, "mouseup", (event) => {
+      if (this.settings.autoShowSelectionToolbar && !isSelectionToolbarTarget(event.target)) {
         window.setTimeout(() => this.toolbar.showForSelection(), 0);
+      }
+    });
+    this.registerDomEvent(document, "keydown", (event) => {
+      if (event.key === "Escape") {
+        this.toolbar.hide();
       }
     });
     this.registerDomEvent(document, "click", (event) => {
@@ -714,6 +747,10 @@ function isMarkdownFile(file: TFile): boolean {
 
 function isAnnotatableFile(file: TFile): boolean {
   return ["md", "pdf"].includes(file.extension.toLowerCase());
+}
+
+function isSelectionToolbarTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(".axl-selection-toolbar"));
 }
 
 function normalizeLineEndings(content: string): string {
